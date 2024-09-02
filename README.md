@@ -3,10 +3,6 @@ xNode is a behavior tree framework designed for creating, managing, and executin
 
 This repository also includes a Flask-based web application that allows you to interact with and manage behavior trees via a web interface. The Flask server supports functionalities like creating behavior trees, adding actions, running trees, and viewing their structure.
 
-
-## Features
-
-
 ## Installation
 
 Clone the repository:

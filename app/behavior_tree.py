@@ -4,8 +4,18 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 import inspect
 from injector import inject
 from functools import singledispatch, singledispatchmethod, wraps
-from error import xNodeError
-from result import xNodeResult, xNodeStatus
+from app.error import xNodeError
+from app.result import xNodeResult, xNodeStatus
+
+def handle_exceptions(func: Callable) -> Callable:
+    @wraps(func)
+    async def wrapper(*args, **kwargs) -> xNodeResult:
+        try:
+            result = await func(*args, **kwargs)
+            return result
+        except Exception as e:
+            return xNodeResult(xNodeStatus.Failure, error=xNodeError(str(e)))
+    return wrapper
 
 class BehaviorTreeContext:
     def __init__(self) -> None:
@@ -18,20 +28,13 @@ class BehaviorTreeContext:
     def get_completed_actions(self) -> List[str]:
         return self._completed_actions.copy()
 
-def handle_exceptions(func: Callable) -> Callable:
-    @wraps(func)
-    async def wrapper(*args, **kwargs) -> xNodeResult:
-        try:
-            result = await func(*args, **kwargs)
-            return result
-        except Exception as e:
-            return xNodeResult(xNodeStatus.Failure, error=xNodeError(str(e)))
-    return wrapper
-
 class Node(ABC):
     @abstractmethod
     async def tick(self, context: BehaviorTreeContext) -> xNodeResult:
-        """Executes the node's logic and returns the result."""
+        pass
+    
+    @abstractmethod
+    def to_dict(self) -> Dict[str, Any]:
         pass
 
 class ActionNode(Node):
@@ -63,6 +66,15 @@ class ActionNode(Node):
         if asyncio.iscoroutine(result):
             result = await result
         return xNodeResult(xNodeStatus.Success) if result else xNodeResult(xNodeStatus.Failure)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': 'ActionNode',
+            'action': self.action.__name__,
+            'repeat': self.repeat,
+            'repeat_count': self.repeat_count,
+            'execute_once': self.execute_once
+        }
 
 class ConditionNode(Node):
     def __init__(self, condition: Callable[[], Union[bool, Awaitable[bool]]]) -> None:
@@ -74,6 +86,12 @@ class ConditionNode(Node):
         else:
             result = self.condition()
         return xNodeResult(xNodeStatus.Success) if result else xNodeResult(xNodeStatus.Failure)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': 'ConditionNode',
+            'condition': self.condition.__name__
+        }
 
 class SequenceNode(Node):
     def __init__(self, children: List[Node]) -> None:
@@ -91,6 +109,12 @@ class SequenceNode(Node):
             self.current_index += 1
         self.current_index = 0
         return xNodeResult(xNodeStatus.Success)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': 'SequenceNode',
+            'children': [child.to_dict() for child in self.children]
+        }
 
 class SelectorNode(Node):
     def __init__(self, children: List[Node]) -> None:
@@ -108,6 +132,13 @@ class SelectorNode(Node):
             self.current_index += 1
         self.current_index = 0
         return xNodeResult(xNodeStatus.Failure)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': 'SelectorNode',
+            'children': [child.to_dict() for child in self.children]
+        }
+
 
 class ParallelNode(Node):
     def __init__(self, children: List[Node], success_threshold: int) -> None:
@@ -123,6 +154,13 @@ class ParallelNode(Node):
             elif result.is_running():
                 return xNodeResult(xNodeStatus.Running)
         return xNodeResult(xNodeStatus.Success) if success_count >= self.success_threshold else xNodeResult(xNodeStatus.Failure)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': 'ParallelNode',
+            'children': [child.to_dict() for child in self.children],
+            'success_threshold': self.success_threshold
+        }
 
 class InvertDecorator(Node):
     def __init__(self, child: Node) -> None:
@@ -135,6 +173,12 @@ class InvertDecorator(Node):
         elif result.is_failure():
             return xNodeResult(xNodeStatus.Success)
         return result
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'type': 'InvertDecorator',
+            'child': self.child.to_dict()
+        }
 
 class BehaviorTree:
     def __init__(self) -> None:
@@ -160,3 +204,13 @@ class BehaviorTree:
             print("Behavior tree is still running!")
         else:
             print("Behavior tree executed successfully!")
+            
+    def to_dict(self) -> Dict[str, Any]:
+        if self.root is None:
+            return {}
+        return {
+            'root': self.root.to_dict(),
+            'context': {
+                'completed_actions': self.context.get_completed_actions()
+            }
+        }

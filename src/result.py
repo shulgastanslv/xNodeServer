@@ -1,4 +1,4 @@
-from app.status import xNodeStatus
+from status import xNodeStatus
 
 class xNodeResult:
     def __init__(self, status, value=None, error=None):
@@ -16,4 +16,4 @@ class xNodeResult:
         return self.status == xNodeStatus.Running
 
     def __repr__(self):
-        return f"Result(status={self.status}, value={self.value}, error={self.error})"
+        return f"xNodeResult(status={self.status}, value={self.value}, error={self.error})"

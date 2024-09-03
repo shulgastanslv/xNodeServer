@@ -4,6 +4,6 @@ class xNodeError(Exception):
         self.message = message
 
     def __repr__(self):
-        return f"CustomError(message={self.message})"
+        return f"xNodeError(message={self.message})"
     
 

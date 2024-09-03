@@ -1,15 +1,7 @@
 [server]
-host = "127.0.0.1"
-port = 5000
-
-[database]
-uri = ""
+host = "localhost"
+port = 8765
+secret_key = "ZFYKPcAvlPjs3a5JF3Fw4J3bsGPdFufE"
 
 [logging]
 level = "INFO"
-
-[flask]
-name = "xNode"
-debug = true
-testing = false
-secret_key = "your_secret_key_here"

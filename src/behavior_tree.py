@@ -4,8 +4,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 import inspect
 from injector import inject
 from functools import singledispatch, singledispatchmethod, wraps
-from app.error import xNodeError
-from app.result import xNodeResult, xNodeStatus
+from error import xNodeError
+from result import xNodeResult, xNodeStatus
 
 def handle_exceptions(func: Callable) -> Callable:
     @wraps(func)

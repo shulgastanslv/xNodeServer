@@ -1,10 +1,10 @@
 import logging
-from websockets import WebSocketServerProtocol, serve
+from websockets import ConnectionClosedError, ConnectionClosedOK, WebSocketServerProtocol, connect, serve
 import json
 import asyncio
 from typing import Callable, Dict, Any
 from behavior_tree import *
-from jwt import InvalidTokenError
+from store import xNodeStore
 
 class Server(ABC):
     @abstractmethod
@@ -14,57 +14,73 @@ class Server(ABC):
     async def handler(self, websocket: WebSocketServerProtocol) -> xNodeResult:
         pass
 
-class Command(ABC):
-    @abstractmethod
-    async def execute(self, server: Server, request: Dict[str, Any]) -> Dict[str, Any]:
-        pass
-    
-
 class xNodeServer(Server):
     
-    def __init__(self, host: str = "localhost", port: int = 8765, loop: asyncio.AbstractEventLoop = None) -> None:
+    def __init__(self, host: str = "localhost", port: int = 8765) -> None:
+        
+        self.behavior_trees: Dict[str, BehaviorTree] = {}
         self.host = host
         self.port = port
-        self.behavior_trees: Dict[str, BehaviorTree] = {}
-        self.actions: Dict[str, Callable] = {}
-        self.conditions: Dict[str, Callable] = {}
+        self.store = xNodeStore()
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger()
-        self.loop = loop or asyncio.get_event_loop()
+    
+    async def send_request_to_dispatchers(self, command: str, request: Dict[str, Any]) -> List[Dict[str, Any]]:
+        results = []
+        for websocket in self.store.active_connections:
+            try:
+                if not websocket.open:
+                    self.logger.warning(f"Skipping closed websocket: {websocket.remote_address}")
+                    continue
 
-    def register_action(self, name: str, action: Callable[[], Union[bool, Awaitable[bool]]]) -> xNodeResult:
-        if name in self.actions:
-            self.logger.error(f"Action '{name}' is already registered. It will be overridden.")
-            return xNodeResult(xNodeStatus.Failure)
-        self.actions[name] = action
-        self.logger.info(f"Action '{name}' registered.")
-        return xNodeResult(xNodeStatus.Success)
+                message = {"command": command, **request}
+                message_str = json.dumps(message)
 
-    def register_condition(self, name: str, condition: Callable[[], Union[bool, Awaitable[bool]]]) -> xNodeResult:
-        if name in self.conditions:
-            self.logger.error(f"Condition '{name}' is already registered. It will be overridden.")
-            return xNodeResult(xNodeStatus.Failure)
-        self.conditions[name] = condition
-        self.logger.info(f"Condition '{name}' registered.")
-        return xNodeResult(xNodeStatus.Success)
+                await websocket.send(message_str)
+                self.logger.info(f"Sent to Dispatcher {websocket.remote_address}: {message_str}")
+
+                response_str = await websocket.recv()
+                self.logger.info(f"Received from Dispatcher {websocket.remote_address}: {response_str}")
+
+                response = json.loads(response_str)
+                results.append(response)
+            except ConnectionClosedOK as e:
+                self.logger.warning(f"Connection closed normally with {websocket.remote_address}: {str(e)}")
+                self.store.active_connections.remove(websocket)
+            except ConnectionClosedError as e:
+                self.logger.error(f"Connection closed with error {websocket.remote_address}: {str(e)}")
+                self.store.active_connections.remove(websocket)
+            except Exception as e:
+                self.logger.error(f"Error sending request to dispatcher {websocket.remote_address}: {str(e)}")
+
+        return results
 
     async def handler(self, websocket: WebSocketServerProtocol) -> xNodeResult:
-        async for message in websocket:
-            try:
-                request = json.loads(message)
-                command = request.get("command")
-                self.logger.info(f"Received command: {command}")
-                response = await self.process_command(command, request)
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Failed to decode JSON: {e}")
-                response = {"status": "error", "message": "Invalid JSON format."}
-            except Exception as e:
-                self.logger.error(f"Error processing command: {e}")
-                response = {"status": "error", "message": str(e)}
+        self.store.active_connections.append(websocket)
+        try:
+            async for message in websocket:
+                try:
+                    request = json.loads(message)
+                    command = request.get("command")
+                    self.logger.info(f"Received command: {command}")
+                    response = await self.process_command(command, request)
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to decode JSON: {e}")
+                    response = {"status": "error", "message": "Invalid JSON format."}
+                except Exception as e:
+                    self.logger.error(f"Error processing command: {e}")
+                    response = {"status": "error", "message": str(e)}
 
-            await websocket.send(json.dumps(response))
-            self.logger.info(f"Sent response: {response}")
-            return xNodeResult(xNodeStatus.Success)
+                await websocket.send(json.dumps(response))
+                self.logger.info(f"Sent response: {response}")
+        except ConnectionClosedOK as e:
+            self.logger.info(f"Connection closed normally: {str(e)}")
+        except ConnectionClosedError as e:
+            self.logger.error(f"Connection closed with error: {str(e)}")
+        finally:
+            if websocket in self.store.active_connections:
+                self.store.active_connections.remove(websocket)
+        return xNodeResult(xNodeStatus.Success)
 
     async def process_command(self, command: str, request: Dict[str, Any]) -> Dict[str, Any]:
         if command == "create_tree":
@@ -76,16 +92,50 @@ class xNodeServer(Server):
         elif command == "get_conditions":
             return self._get_conditions()
         elif command == "get_tree":
-            return self._get_tree(request)
+            return await self._get_tree(request)
+        elif command == "register_action":
+            return await self._register_action(request)
+        elif command == "register_condition":
+            return await self._register_condition(request)
+        elif command == "invoke_func":
+            return await self._invoke_function(request)
         else:
             return {"status": "error", "message": f"Unknown command: {command}"}
+
+    async def _register_action(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        self.logger.info(f"Registering action with request: {request}")
+        name = request.get("name")
+        if name:
+            self.store.actions[name] = lambda: True  # Dummy implementation
+            return {"status": "success", "message": f"Action '{name}' registered."}
+        else:
+            return {"status": "error", "message": "Invalid action registration request."}
+
+    async def _register_condition(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        self.logger.info(f"Registering condition with request: {request}")
+        name = request.get("name")
+        if name:
+            # Add condition registration logic here
+            self.store.conditions[name] = lambda: False  # Dummy implementation
+            return {"status": "success", "message": f"Condition '{name}' registered."}
+        else:
+            return {"status": "error", "message": "Invalid condition registration request."}
+    
+    async def _invoke_function(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        name = request.get("fnc_name")
+        if not name:
+            return {"status": "error", "message": "Function name not provided."}
+        
+        results = await self.send_request_to_dispatchers("invoke_func", {"name": name})
+        
+        return {"status": "success", "results": results}
 
     async def _create_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
         tree_id = request.get("tree_id")
         tree_structure = request.get("tree_structure")
         if tree_id and tree_structure:
             tree = self._create_tree_from_dict(tree_structure)
-            self.behavior_trees[tree_id] = tree
+            self.store.behavior_trees[tree_id] = tree
             self.logger.info(f"Tree {tree_id} created.")
             return {"status": "success", "message": f"Tree {tree_id} created."}
         else:
@@ -94,8 +144,8 @@ class xNodeServer(Server):
 
     async def _run_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
         tree_id = request.get("tree_id")
-        if tree_id in self.behavior_trees:
-            tree = self.behavior_trees[tree_id]
+        if tree_id in self.store.behavior_trees:
+            tree = self.store.behavior_trees[tree_id]
             await tree.run()
             self.logger.info(f"Tree {tree_id} executed.")
             return {"status": "success", "message": f"Tree {tree_id} executed."}
@@ -111,8 +161,8 @@ class xNodeServer(Server):
 
     def _get_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
         tree_id = request.get("tree_id")
-        if tree_id in self.behavior_trees:
-            tree = self.behavior_trees[tree_id]
+        if tree_id in self.store.behavior_trees:
+            tree = self.store.behavior_trees[tree_id]
             return {"tree": tree.to_dict()}
         else:
             self.logger.warning(f"Tree {tree_id} not found.")
@@ -134,7 +184,7 @@ class xNodeServer(Server):
 
     def _create_action_node(self, tree_dict: Dict[str, Any]) -> BehaviorTree:
         action_name = tree_dict.get('action')
-        action = self.actions.get(action_name)
+        action = self.store.actions.get(action_name)
         if action is None:
             raise ValueError(f"Action '{action_name}' not found.")
         repeat = tree_dict.get('repeat', False)
@@ -147,7 +197,7 @@ class xNodeServer(Server):
 
     def _create_condition_node(self, tree_dict: Dict[str, Any]) -> BehaviorTree:
         condition_name = tree_dict.get('condition')
-        condition = self.conditions.get(condition_name)
+        condition = self.store.conditions.get(condition_name)
         if condition is None:
             raise ValueError(f"Condition '{condition_name}' not found.")
         node = ConditionNode(condition)
@@ -177,8 +227,7 @@ class xNodeServer(Server):
         return tree
 
     async def run(self) -> xNodeResult:
-        server = serve(self.handler, self.host, self.port)
-        await server
-        self.logger.info(f"Server started on {self.host}:{self.port}")
-        await asyncio.Future()
-        return xNodeResult(xNodeStatus.Success)
+        async def handle_connection(websocket: WebSocketServerProtocol, path: str) -> None:
+            await self.handler(websocket)
+        async with serve(handle_connection, self.host, self.port):
+            await asyncio.Future()

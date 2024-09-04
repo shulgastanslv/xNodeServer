@@ -24,7 +24,10 @@ class CreateTreeCommand(Command):
 class RunTreeCommand(Command):
     def __init__(self, tree_id: str) -> None:
         super().__init__("run_tree", tree_id=tree_id)
-
+        
+class InvokeFunction(Command):
+    def __init__(self, func_name: str) -> None:
+        super().__init__("invoke_func", fnc_name=func_name)
 class GetActionsCommand(Command):
     def __init__(self) -> None:
         super().__init__("get_actions")
@@ -76,7 +79,7 @@ class xNodeClient:
 async def main():
     client = xNodeClient()
     await client.connect()
-    await client.send(GetActionsCommand())
+    await client.send(InvokeFunction('hello_world'))
     await client.close()
 
 asyncio.run(main())

@@ -5,3 +5,12 @@ secret_key = "ZFYKPcAvlPjs3a5JF3Fw4J3bsGPdFufE"
 
 [logging]
 level = "INFO"
+
+[project]
+name ="xNodeServer"
+version = "0.0.1"
+dependencies = [
+    "common",
+    "api",
+    "src"
+]

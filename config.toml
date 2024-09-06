@@ -9,8 +9,3 @@ level = "INFO"
 [project]
 name ="xNodeServer"
 version = "0.0.1"
-dependencies = [
-    "common",
-    "api",
-    "src"
-]

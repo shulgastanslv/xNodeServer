@@ -44,7 +44,7 @@ class xNodeDispatcher:
     async def register_condition(self, name: str, condition: Callable[[], Union[bool, Awaitable[bool]]]) -> Dict[str, Any]:
         return await self.__register(name, condition, RegisterCondition())
 
-    async def invoke_function(self, name: str) -> Union[bool, Awaitable[bool]]:
+    async def invoke(self, name: str) -> Union[bool, Awaitable[bool]]:
         if name in self.__store.actions:
             result = await self.__store.actions[name]()
             return result
@@ -63,24 +63,10 @@ class xNodeDispatcher:
                 if command == "invoke_func":
                     name = request.get('name')
                     if name in self.actions:
-                        result = await self.invoke_function(name)
+                        result = await self.invoke(name)
                         response = json.dumps({'result': result})
                         await websocket.send(response)
                     else:
                         error_response = json.dumps({'error': f"Function '{name}' not registered"})
                         await websocket.send(error_response)
                         
-
-async def main():
-    server_uri = 'ws://localhost:8765'
-    dispatcher = xNodeDispatcher(server_uri)
-    
-    @dispatcher.action()
-    async def hello() -> bool:
-        print("Hello World!")
-        return True
-
-    await dispatcher.start()
-
-if __name__ == '__main__':
-    asyncio.run(main())

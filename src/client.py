@@ -5,40 +5,21 @@ from typing import Any, Dict, Optional, Type
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("xNodeClient")
+logger = logging.getLogger()
 
 class Command:
-    def __init__(self, name: str, **kwargs: Any) -> None:
-        self.name = name
+    def __init__(self, command_name: str, **kwargs: Any) -> None:
+        self.command_name = command_name
         self.kwargs = kwargs
 
     def to_dict(self) -> Dict[str, Any]:
-        command = {"command": self.name}
+        command = {"command": self.command_name}
         command.update(self.kwargs)
         return command
 
-class CreateTreeCommand(Command):
-    def __init__(self, tree_id: str, tree_structure: Dict[str, Any]) -> None:
-        super().__init__("create_tree", tree_id=tree_id, tree_structure=tree_structure)
-
-class RunTreeCommand(Command):
-    def __init__(self, tree_id: str) -> None:
-        super().__init__("run_tree", tree_id=tree_id)
-        
-class InvokeFunction(Command):
-    def __init__(self, func_name: str) -> None:
-        super().__init__("invoke_func", fnc_name=func_name)
-class GetActionsCommand(Command):
-    def __init__(self) -> None:
-        super().__init__("get_actions")
-
-class GetConditionsCommand(Command):
-    def __init__(self) -> None:
-        super().__init__("get_conditions")
-
-class GetTreeCommand(Command):
-    def __init__(self, tree_id: str) -> None:
-        super().__init__("get_tree", tree_id=tree_id)
+class RegisterAction(Command):
+    def __init__(self, action_id: str, name_action : str) -> None:
+        super().__init__("register_action", id=action_id, name=name_action)
 
 class xNodeClient:
     def __init__(self, host: str = "localhost", port: int = 8765) -> None:
@@ -79,7 +60,7 @@ class xNodeClient:
 async def main():
     client = xNodeClient()
     await client.connect()
-    await client.send(InvokeFunction('hello_world'))
+    await client.send(RegisterAction('1', 'test'))
     await client.close()
 
 asyncio.run(main())

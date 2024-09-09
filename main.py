@@ -1,5 +1,13 @@
-from src.behavior_tree import *
+import asyncio
+from common.config import Config
+from src.server import xNodeServer
 
-action = Action('1', lambda : True, 'test')
-action_node = ActionNode(action) 
-print(action_node.child.id)    
+async def main():
+    server = xNodeServer()
+    await server.run()
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

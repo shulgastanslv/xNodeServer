@@ -1,21 +1,14 @@
 from abc import ABC, abstractmethod
 import asyncio
+from dataclasses import asdict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 import inspect
 from injector import inject
 from functools import singledispatch, singledispatchmethod, wraps
 from common.error import xNodeError
 from common.result import xNodeResult, xNodeStatus
-
-def handle_exceptions(func: Callable) -> Callable:
-    @wraps(func)
-    async def wrapper(*args, **kwargs) -> xNodeResult:
-        try:
-            result = await func(*args, **kwargs)
-            return result
-        except Exception as e:
-            return xNodeResult(xNodeStatus.Failure, error=xNodeError(str(e)))
-    return wrapper
+from src.entities import Action
+from src.node_type import NodeType
 
 class BehaviorTreeContext:
     def __init__(self) -> None:
@@ -33,48 +26,40 @@ class Node(ABC):
     async def tick(self, context: BehaviorTreeContext) -> xNodeResult:
         pass
     
-    @abstractmethod
-    def to_dict(self) -> Dict[str, Any]:
-        pass
 
 class ActionNode(Node):
-    def __init__(self, action: Callable[[], Union[bool, Awaitable[bool]]], repeat: bool = False, 
-                 repeat_count: int = 1, execute_once: bool = False) -> None:
-        self.action = action
-        self.repeat = repeat
-        self.repeat_count = repeat_count
-        self.execute_once = execute_once
+    def __init__(self, action : Action) -> None:
+        self.child : Action = action
 
     async def tick(self, context: BehaviorTreeContext) -> xNodeResult:
-        action_id = f"{self.action.__name__}"
-        if self.repeat:
-            for _ in range(self.repeat_count):
-                if self.execute_once and action_id in context.get_completed_actions():
-                    continue
-                result = await self._execute_action()
+        id : str = self.child.id
+        
+        if self.execute_once and id in context.get_completed_actions():
+            return xNodeResult(xNodeStatus.Success)
+        
+        if self.child.repeat:
+            for _ in range(self.child.repeat_count):
+                result = await self.__execute_action()
                 if result.is_failure():
                     return result
             return xNodeResult(xNodeStatus.Success)
         else:
-            if self.execute_once and action_id in context.get_completed_actions():
-                return xNodeResult(xNodeStatus.Success)
-            return await self._execute_action()
+            return await self.__execute_action()
     
-    @handle_exceptions
-    async def _execute_action(self) -> xNodeResult:
-        result = self.action()
+    async def __execute_action(self) -> xNodeResult:
+        result = self.child.func()
         if asyncio.iscoroutine(result):
             result = await result
         return xNodeResult(xNodeStatus.Success) if result else xNodeResult(xNodeStatus.Failure)
     
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'type': 'ActionNode',
-            'action': self.action.__name__,
-            'repeat': self.repeat,
-            'repeat_count': self.repeat_count,
-            'execute_once': self.execute_once
-        }
+    def __repr__(self) -> str:
+        return f"{asdict(self.action)}"
+    
+
+
+
+
+
 
 class ConditionNode(Node):
     def __init__(self, condition: Callable[[], Union[bool, Awaitable[bool]]]) -> None:

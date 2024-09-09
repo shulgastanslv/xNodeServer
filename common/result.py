@@ -1,4 +1,4 @@
-from status import xNodeStatus
+from common.status import xNodeStatus
 
 class xNodeResult:
     def __init__(self, status, value=None, error=None):

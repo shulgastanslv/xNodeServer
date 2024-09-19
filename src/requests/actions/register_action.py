@@ -2,6 +2,6 @@
 from dataclasses import dataclass
 
 @dataclass
-class RegisterActionRequest:
+class RegisterActionRequest():
     id: str
     name: str
